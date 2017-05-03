@@ -1,0 +1,579 @@
+---
+title: "PhyloMeth Project ML"
+author: "Maggie Limbeck"
+date: "4/11/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+For the project I am going to take the fitPagel function in phytools (Revell) and adjust it to incorporate three characters into its analysis instead of two. It the Maddison Fitzgerald paper from 2014 it is suggested that the Pagel method often leads to false correlations because it only utilizes two characters. By adding this third character the Pagel method hopefully will not have the same false correlations as it did with just two. 
+
+First, let's look at the existing function for the Pagel Method (exercise and code taken from Levell's blog 2014).
+```{r setup, include=TRUE}
+install.packages("phytools")
+library(phytools)
+library(geiger)
+
+##Simulate uncorrelated data
+tree<-pbtree(n=300,scale=1)
+Q<-matrix(c(0,-1,-1,0),2,2)
+rownames(Q)<-colnames(Q)<-letters[1:2]
+ttl<-sim.history(tree,Q)
+tt2<-sim.history(tree,Q)
+
+##These are uncorrelated, see:
+par(mfrow=c(1,2))
+plotSimmap(ttl,setNames(c("blue","red"),letters[1:2]),ftype="off",lwd=1)
+plotSimmap(tt2,setNames(c("blue","red"),letters[1:2]),ftype="off",lwd=1,direction="leftwards")
+
+x<-ttl$states
+y<-tt2$states
+fit.ape<-fitPagel(tree,x,y)
+fit.ape
+
+fit.geiger<-fitPagel(tree,x,y,method="fitDiscrete")
+fit.geiger
+
+
+#Correlated Data Set
+tree<-pbtree(n=300,scale=1)
+Q<-matrix(c(0,0.5,0.5,0,2,0,0,2,2,0,0,2,0,0.5,0.5,0),4,4,byrow=TRUE)
+rownames(Q)<-colnames(Q)<-c("aa","ab","ba","bb")
+diag(Q)<--rowSums(Q)
+tt<-sim.history(tree,t(Q))
+
+tt1<-mergeMappedStates(tt,c("aa","ab"),"a")
+tt1<-mergeMappedStates(tt1,c("ba","bb"),"b")
+tt2<-mergeMappedStates(tt,c("aa","ba"),"a")
+tt2<-mergeMappedStates(tt2,c("ab","bb"),"b")
+## these data are correlated, see:
+par(mfrow=c(1,2))
+plotSimmap(tt1,setNames(c("blue","red"),letters[1:2]),ftype="off",lwd=1)
+plotSimmap(tt2,setNames(c("blue","red"),letters[1:2]),ftype="off",lwd=1,direction="leftwards")
+
+x<-getStates(tt1,"tips")
+y<-getStates(tt2,"tips")
+fit.ape<-fitPagel(tree,x,y)
+fit.ape
+
+fit.geiger<-fitPagel(tree,x,y,method="fitDiscrete")
+fit.geiger
+plot.fitPagel
+```
+
+
+Playing around with different variables:
+```{r setup, include=TRUE}
+treeA<-pbtree(n=300,scale=1)
+QA<-matrix(c(0,1,1,0),2,2)
+rownames(QA)<-colnames(QA)<-letters[1:2]
+tt3<-sim.history(treeA,QA)
+tt4<-sim.history(treeA,QA)
+
+par(mfrow=c(1,2))
+plotSimmap(tt3,setNames(c("blue","red"),letters[1:2]),ftype="off",lwd=1)
+plotSimmap(tt4,setNames(c("blue","red"),letters[1:2]),ftype="off",lwd=1,direction="leftwards")
+
+xA<-tt3$states
+yA<-tt4$states
+fit.apeA<-fitPagel(treeA,xA,yA)
+fit.apeA
+
+fit.geigerA<-fitPagel(treeA,xA,yA,method="fitMk")
+fit.geigerA
+
+treeB<-pbtree(n=300,scale=1)
+QB<-matrix(c(0,0.5,0.5,0,2,0,0,2,2,0,0,2,0,0.5,0.5,0),4,4,byrow=TRUE)
+rownames(QB)<-colnames(QB)<-c("aa","ab","ba","bb")
+diag(QB)<--rowSums(QB)
+tt<-sim.history(treeB,t(QB))
+
+tt3<-mergeMappedStates(tt,c("aa","ab"),"a")
+tt3<-mergeMappedStates(tt3,c("ba","bb"),"b")
+tt4<-mergeMappedStates(tt,c("aa","ba"),"a")
+tt4<-mergeMappedStates(tt4,c("ab","bb"),"b")
+## these data are correlated, see:
+par(mfrow=c(1,2))
+plotSimmap(tt3,setNames(c("blue","red"),letters[1:2]),ftype="off",lwd=1)
+plotSimmap(tt4,setNames(c("blue","red"),letters[1:2]),ftype="off",lwd=1,direction="leftwards")
+
+xB<-getStates(tt1,"tips")
+yB<-getStates(tt2,"tips")
+fit.apeB<-fitPagel(treeB,xB,yB)
+fit.apeB
+
+fit.geigerB<-fitPagel(treeB,xB,yB,method="fitMk")
+fit.geigerB
+```
+
+Now that we have the original function, let's try and take it apart. 
+
+From the help file:
+fitPagel(tree,x,y,method=,model=,dep.var="xy",...)
+
+Need to find a way to add z vector and compare with x and y.
+
+**How to make a function:**
+
+  foo <- function(phy, x, ...) {
+  
+    number <- Ntips(phy)
+    if(number %% x ==0 ) {
+      print("Even number of tips!")
+      plot()
+    }
+    return(number %% x)
+  }
+  
+  ALSO: *taken from velociraptr github page
+  ageRanges<-function(Data,Taxonomy="genus") {
+	Data<-subset(Data,is.na(Data[,Taxonomy])!=TRUE) # Remove NA's
+	Data[,Taxonomy]<-factor(Data[,Taxonomy]) # Drop hanging attributes
+	PBDBEarly<-tapply(Data[,"max_ma"],Data[,Taxonomy],max) # Calculate max age
+	PBDBLate<-tapply(Data[,"min_ma"],Data[,Taxonomy],min) # Calculate min age
+	AgesPBDB<-cbind(PBDBEarly,PBDBLate) # Bind ages
+	colnames(AgesPBDB)<-c("EarlyAge","LateAge")
+	return(data.matrix(AgesPBDB))
+	}
+	
+	Found code for fitPagel on their github-edited it to include a third binary character state in the arguments. 
+	
+```{r setup, include=TRUE}
+  PagelMeth <- function(paste, xy) {
+    fitPagel<-function(tree,x,y,z,method="fitMk",model="ARD",dep.var="xyz",...){
+      if(!inherits(tree,"phylo")) stop("tree should be object of class \"phylo\".")
+      if(dep.var%in%c("x","y","z","xyz")==FALSE){
+        cat("  Invalid option for argument \"dep.var\".\n")
+        cat("  Setting dep.var=\"xyz\" (x depends on y & z & vice versa)\n\n")
+        dep.var<-"xyz"
+      }
+      if(model%in%c("ER","SYM","ARD")==FALSE){
+        cat("  Invalid model. Setting model=\"ARD\"\n\n")
+        model<-"ARD"
+      }
+      if(method=="fitDiscrete"){
+        chk<-.check.pkg("geiger")
+        if(!chk){
+          cat("  method = \"fitDiscrete\" requires the package \"geiger\"\n")
+          cat("  Defaulting to method = \"fitMk\"\n\n")
+          method<-"fitMk"
+          fitDiscrete<-function(...) NULL
+        }
+      }
+      if(method%in%c("fitDiscrete","ace","fitMk")==FALSE){
+        cat(paste("  method = \"",method,"\" not found.\n",sep=""))
+        cat("  Defaulting to method = \"fitMk\"\n\n")
+        method<-"fitMk"
+      }
+      if(!is.factor(x)) x<-as.factor(x)
+      levels.x<-levels(x)
+      if(!is.factor(y)) y<-as.factor(y)
+      levels.y<-levels(y)
+      if(!is.factor(z)) z<-as.factor(z)
+      levels.z<-levels(z)
+      y<-y[names(x)]
+      if(length(levels.x)!=2||length(levels.y)!=2)
+        stop("Only binary characters for x & y currently permitted.")
+      xyz<-setNames(factor(paste(x,y,z,sep="|"),
+                          levels=sapply(levels.x,paste,levels.y,levels.z,paste,sep="|")),
+                   names(x))
+      ## fit independent dep.var
+      iQ<-matrix(c(0,1,2,0,3,0,0,2,4,0,0,1,0,4,3,0),4,4,byrow=TRUE)
+      if(model%in%c("ER","SYM")) iQ<-make.sym(iQ)
+      k.iQ<-length(unique(as.vector(iQ)))-1
+      rownames(iQ)<-colnames(iQ)<-levels(xyz)
+      fit.iQ<-if(method=="fitDiscrete") fitDiscrete(tree,xyz,model=iQ,...) 
+      else if(method=="ace") ace(xyz,tree,type="discrete",model=iQ,...)
+      else fitMk(tree,to.matrix(xyz,levels(xyz)),model=iQ,...)
+      ## fit dependendent model
+      if(dep.var=="xyz")
+        dQ<-matrix(c(0,1,2,0,3,0,0,4,5,0,0,6,0,7,8,0),4,4,byrow=TRUE)
+      else if(dep.var=="x")
+        dQ<-matrix(c(0,1,2,0,3,0,0,4,5,0,0,1,0,6,3,0),4,4,byrow=TRUE)
+      else if(dep.var=="y")
+        dQ<-matrix(c(0,1,2,0,3,0,0,2,4,0,0,5,0,4,6,0),4,4,byrow=TRUE)
+      else if(dep.var=="z")
+        dQ<-matrix(c(0,1,2,0,3,0,0,2,4,0,0,5,0,4,6,0),4,4,byrow=TRUE)
+      if(model%in%c("ER","SYM")) dQ<-make.sym(dQ)
+      k.dQ<-length(unique(as.vector(dQ)))-1
+      rownames(dQ)<-colnames(dQ)<-levels(xyz)
+      fit.dQ<-if(method=="fitDiscrete") fitDiscrete(tree,xyz,model=dQ,...) 
+      else if(method=="ace") ace(xyz,tree,type="discrete",model=dQ,...)
+      else fitMk(tree,to.matrix(xyz,levels(xyz)),model=dQ,...)
+      ## back translate independent model
+      if(method=="fitDiscrete") iQ<-.Qmatrix.from.gfit(fit.iQ)
+      else {
+        I<-fit.iQ$index.matrix
+        I[I==0]<-NA
+        iQ<-apply(I,2,function(i,x) x[i],x=fit.iQ$rates)
+        iQ[is.na(iQ)]<-0
+        diag(iQ)<--rowSums(iQ)
+        rownames(iQ)<-colnames(iQ)
+      }
+      ## dependent model
+      if(method=="fitDiscrete") dQ<-.Qmatrix.from.gfit(fit.dQ)
+      else {
+        I<-fit.dQ$index.matrix
+        I[I==0]<-NA
+        dQ<-apply(I,2,function(i,x) x[i],x=fit.dQ$rates)
+        dQ[is.na(dQ)]<-0
+        diag(dQ)<--rowSums(dQ)
+        rownames(dQ)<-colnames(dQ)
+      }
+      ## assemble object to return
+      obj<-list(independent.Q=iQ,
+                dependent.Q=dQ,
+                independent.logL=logLik(fit.iQ),
+                dependent.logL=logLik(fit.dQ),
+                independent.AIC=2*k.iQ-2*logLik(fit.iQ),
+                dependent.AIC=2*k.dQ-2*logLik(fit.dQ),
+                lik.ratio=2*(logLik(fit.dQ)-logLik(fit.iQ)),
+                P=pchisq(2*(logLik(fit.dQ)-logLik(fit.iQ)),
+                         df=k.dQ-k.iQ,
+                         lower.tail=FALSE),
+                method=method,
+                dep.var=dep.var,
+                model=model)
+      class(obj)<-"PagelMeth"
+      obj
+    }
+  }
+```	
+This function already exists in corHmm. Sad. Will try using two binary traits and a three state trait instead...totally possible this exists or someone will code it before I finish. 
+
+How to make a three state trait? Not sure but it makes sense to take this line from Revell's fitPagel and change the 2 to three to allow a three state trait:
+
+if(length(levels.x)!=2||length(levels.y)!=2)
+        stop("Only binary characters for x & y currently permitted.")
+        
+Since it has a stop here that would presumbably result in an error if you tried inputting a three state trait. Changing the !=2 to !=3 could allow a three state trait? Maybe? Also here is some fancy code and a pretty plot Brian made to help visualize the rate changes between states.
+```{r setup,include=TRUE}
+library(igraph)
+
+GetDistances <- function(pair) {
+  print(pair)
+  distance=0
+  for (i in sequence(ncol(pair))) {
+    if(pair[1,i]!=pair[2,i]) {
+      distance=distance+1
+    }
+  }
+  print(distance)
+  return(distance)
+}
+combos <- expand.grid(x=c("a","b"), y=c("a", "b"), z=c("a", "b", "c"))
+g <- make_empty_graph()
+g <- add.vertices(g, nrow(combos), name = apply(combos, 1, paste, collapse=""))
+for (start.node in sequence(nrow(combos))) {
+  for (end.node in sequence(nrow(combos)))
+    if(GetDistances(combos[c(start.node, end.node),])==1) {
+      g <- add.edges(g, c(start.node, end.node))
+    }
+}
+
+plot.igraph(g, edge.arrow.mode=0)
+```
+Now that I can visualize this let's try and change the code.
+
+```{r setup, include=TRUE}
+  PagelMeth <- function(paste, xy) {
+    fitPagel<-function(tree,x,y,z,method="fitMk",model="ARD",dep.var="xyz",...){
+      if(!inherits(tree,"phylo")) stop("tree should be object of class \"phylo\".")
+      if(dep.var%in%c("x","y","z","xyz")==FALSE){
+        cat("  Invalid option for argument \"dep.var\".\n")
+        cat("  Setting dep.var=\"xyz\" (x depends on y & z & vice versa)\n\n")
+        dep.var<-"xyz"
+      }
+      if(model%in%c("ER","SYM","ARD")==FALSE){
+        cat("  Invalid model. Setting model=\"ARD\"\n\n")
+        model<-"ARD"
+      }
+      if(method=="fitDiscrete"){
+        chk<-.check.pkg("geiger")
+        if(!chk){
+          cat("  method = \"fitDiscrete\" requires the package \"geiger\"\n")
+          cat("  Defaulting to method = \"fitMk\"\n\n")
+          method<-"fitMk"
+          fitDiscrete<-function(...) NULL
+        }
+      }
+      if(method%in%c("fitDiscrete","ace","fitMk")==FALSE){
+        cat(paste("  method = \"",method,"\" not found.\n",sep=""))
+        cat("  Defaulting to method = \"fitMk\"\n\n")
+        method<-"fitMk"
+      }
+      if(!is.factor(x)) x<-as.factor(x)
+      levels.x<-levels(x)
+      if(!is.factor(y)) y<-as.factor(y)
+      levels.y<-levels(y)
+      if(!is.factor(z)) z<-as.factor(z)
+      levels.z<-levels(z)
+      y<-y[names(x)]
+      if(length(levels.x)!=2||length(levels.y)!=2||length(levels.z)!=3
+        stop("Only binary characters for x & y currently permitted.")
+      xyz<-setNames(factor(paste(x,y,z,sep="|"),
+                          levels=sapply(levels.x,paste,levels.y,levels.z,paste,sep="|")),
+                   names(x))
+      ## fit independent dep.var
+      iQ<-matrix(c(0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0),12,12,byrow=TRUE)
+      if(model%in%c("ER","SYM")) iQ<-make.sym(iQ)
+      k.iQ<-length(unique(as.vector(iQ)))-1
+      rownames(iQ)<-colnames(iQ)<-levels(xyz)
+      fit.iQ<-if(method=="fitDiscrete") fitDiscrete(tree,xyz,model=iQ,...) 
+      else if(method=="ace") ace(xyz,tree,type="discrete",model=iQ,...)
+      else fitMk(tree,to.matrix(xyz,levels(xyz)),model=iQ,...)
+      ## fit dependendent model
+      if(dep.var=="xyz")
+        dQ<-matrix(c(0,1,2,3,4,5,6,7,8,9,10,0,11,0,12,13,14,15,16,17,18,19,0,20,21,22,0,23,24,25,26,27,28,0,29,30,31,32,33,0,34,35,36,37,0,38,39,40,41,42,43,44,0,45,46,0,47,48,49,50,51,52,53,54,55,0,0,56,57,58,59,60,61,62,63,64,65,0,0,66,67,68,69,70,71,72,73,74,0,75,76,0,77,78,79,80,81,82,83,0,84,85,86,87,0,88,89,90,91,92,0,93,94,95,96,97,98,0,99,100,101,0,102,103,104,105,106,107,108,109,0,110,0,111,112,113,114,115,116,117,118,119,120,0),12,12,byrow=TRUE)
+      else if(dep.var=="x")
+        dQ<-matrix(c(0,1,2,0,3,0,0,4,5,0,0,1,0,6,3,0),12,12,byrow=TRUE)
+      else if(dep.var=="y")
+        dQ<-matrix(c(0,1,2,0,3,0,0,2,4,0,0,5,0,4,6,0),12,12,byrow=TRUE)
+      else if(dep.var=="z")
+        dQ<-matrix(c(0,1,2,0,3,0,0,2,4,0,0,5,0,4,6,0),12,12,byrow=TRUE)
+      if(model%in%c("ER","SYM")) dQ<-make.sym(dQ)
+      k.dQ<-length(unique(as.vector(dQ)))-1
+      rownames(dQ)<-colnames(dQ)<-levels(xyz)
+      fit.dQ<-if(method=="fitDiscrete") fitDiscrete(tree,xyz,model=dQ,...) 
+      else if(method=="ace") ace(xyz,tree,type="discrete",model=dQ,...)
+      else fitMk(tree,to.matrix(xyz,levels(xyz)),model=dQ,...)
+      ## back translate independent model
+      if(method=="fitDiscrete") iQ<-.Qmatrix.from.gfit(fit.iQ)
+      else {
+        I<-fit.iQ$index.matrix
+        I[I==0]<-NA
+        iQ<-apply(I,2,function(i,x) x[i],x=fit.iQ$rates)
+        iQ[is.na(iQ)]<-0
+        diag(iQ)<--rowSums(iQ)
+        rownames(iQ)<-colnames(iQ)
+      }
+      ## dependent model
+      if(method=="fitDiscrete") dQ<-.Qmatrix.from.gfit(fit.dQ)
+      else {
+        I<-fit.dQ$index.matrix
+        I[I==0]<-NA
+        dQ<-apply(I,2,function(i,x) x[i],x=fit.dQ$rates)
+        dQ[is.na(dQ)]<-0
+        diag(dQ)<--rowSums(dQ)
+        rownames(dQ)<-colnames(dQ)
+      }
+      ## assemble object to return
+      obj<-list(independent.Q=iQ,
+                dependent.Q=dQ,
+                independent.logL=logLik(fit.iQ),
+                dependent.logL=logLik(fit.dQ),
+                independent.AIC=2*k.iQ-2*logLik(fit.iQ),
+                dependent.AIC=2*k.dQ-2*logLik(fit.dQ),
+                lik.ratio=2*(logLik(fit.dQ)-logLik(fit.iQ)),
+                P=pchisq(2*(logLik(fit.dQ)-logLik(fit.iQ)),
+                         df=k.dQ-k.iQ,
+                         lower.tail=FALSE),
+                method=method,
+                dep.var=dep.var,
+                model=model)
+      class(obj)<-"fitPagel"
+      obj
+    }
+  }
+```
+Stopping this crazy nonsense. Instead of hard-coding the rate matrix Brian showed me how to generate a Q matrix by coding. Trying to add that in and see if it works. 
+```{r setup, include=TRUE}
+PagelMeth <- function(paste, xy) {
+    fitPagel<-function(tree,x,y,z,method="fitMk",model="ARD",dep.var="xyz",...){
+      if(!inherits(tree,"phylo")) stop("tree should be object of class \"phylo\".")
+      if(dep.var%in%c("x","y","z","xyz")==FALSE){
+        cat("  Invalid option for argument \"dep.var\".\n")
+        cat("  Setting dep.var=\"xyz\" (x depends on y & z & vice versa)\n\n")
+        dep.var<-"xyz"
+      }
+      if(model%in%c("ER","SYM","ARD")==FALSE){
+        cat("  Invalid model. Setting model=\"ARD\"\n\n")
+        model<-"ARD"
+      }
+      if(method=="fitDiscrete"){
+        chk<-.check.pkg("geiger")
+        if(!chk){
+          cat("  method = \"fitDiscrete\" requires the package \"geiger\"\n")
+          cat("  Defaulting to method = \"fitMk\"\n\n")
+          method<-"fitMk"
+          fitDiscrete<-function(...) NULL
+        }
+      }
+      if(method%in%c("fitDiscrete","ace","fitMk")==FALSE){
+        cat(paste("  method = \"",method,"\" not found.\n",sep=""))
+        cat("  Defaulting to method = \"fitMk\"\n\n")
+        method<-"fitMk"
+      }
+      if(!is.factor(x)) x<-as.factor(x)
+      levels.x<-levels(x)
+      if(!is.factor(y)) y<-as.factor(y)
+      levels.y<-levels(y)
+      if(!is.factor(z)) z<-as.factor(z)
+      levels.z<-levels(z)
+      y<-y[names(x)]
+      if(length(levels.x)!=3||length(levels.y)!=3||length(levels.z)!=3
+       xyz<-setNames(factor(paste(x,y,z,sep="|"),
+                          levels=sapply(levels.x,paste,levels.y,levels.z,paste,sep="|")),
+                   names(x))
+library(igraph)
+
+GetDistances <- function(pair) {
+  print(pair)
+  distance=0
+  for (i in sequence(ncol(pair))) {
+    if(pair[1,i]!=pair[2,i]) {
+      distance=distance+1
+    }
+  }
+  print(distance)
+  return(distance)
+}
+
+combos <- expand.grid(x=c("a","b"), y=c("a", "b"), z=c("a", "b", "c"))
+g <- make_empty_graph()
+g <- add.vertices(g, nrow(combos), name = apply(combos, 1, paste, collapse=""))
+for (start.node in sequence(nrow(combos))) {
+  for (end.node in sequence(nrow(combos)))
+    if(GetDistances(combos[c(start.node, end.node),])==1) {
+      g <- add.edges(g, c(start.node, end.node))
+    }
+}
+
+plot.igraph(g, edge.arrow.mode=0)
+
+WhichAreDifferent <- function(pair) {
+  distance=0
+  which.different=c()
+  for (i in sequence(ncol(pair))) {
+    if(pair[1,i]!=pair[2,i]) {
+      distance=distance+1
+      which.different <- c(which.different, i)
+    }
+  }
+  return(which.different)
+}
+
+MakeQMatrix <- function(dep.var=NULL, combos=expand.grid(x=c("a","b"), y=c("a", "b"), z=c("a", "b", "c"))) {
+  Q <- matrix(0, nrow=nrow(combos), ncol=nrow(combos))
+  for (start.node in sequence(nrow(combos))) {
+    for (end.node in sequence(nrow(combos))) {
+      if(GetDistances(combos[c(start.node, end.node),])==1) {
+        if(is.null(dep.var)) {
+          Q[start.node, end.node] <- 1+max(Q)
+        }
+        if(dep.var=="xyz")
+        dQ<-matrix(c(0,1,2,3,4,5,6,7,8,9,10,0,11,0,12,13,14,15,16,17,18,19,0,20,21,22,0,23,24,25,26,27,28,0,29,30,31,32,33,0,34,35,36,37,0,38,39,40,41,42,43,44,0,45,46,0,47,48,49,50,51,52,53,54,55,0,0,56,57,58,59,60,61,62,63,64,65,0,0,66,67,68,69,70,71,72,73,74,0,75,76,0,77,78,79,80,81,82,83,0,84,85,86,87,0,88,89,90,91,92,0,93,94,95,96,97,98,0,99,100,101,0,102,103,104,105,106,107,108,109,0,110,0,111,112,113,114,115,116,117,118,119,120,0),12,12,byrow=TRUE)
+       
+        if(dep.var=="x") {
+          different.x <- WhichAreDifferent(combos[c(start.node, end.node),])
+          dQ<-different.x
+        }
+        if(dep.var=="y") {
+          different.y <- WhichAreDifferent(combos[c(start.node, end.node),])
+          dQ<-different.y
+        }
+        if(dep.var=="z") {
+          different.z <- WhichAreDifferent(combos[c(start.node, end.node),])
+          dQ<-different.z
+        }
+      }
+   }
+}
+  return(Q)
+}       
+iQ<-matrix(c(0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0),12,12,byrow=TRUE)
+      if(model%in%c("ER","SYM")) iQ<-make.sym(iQ)
+      k.iQ<-length(unique(as.vector(iQ)))-1
+      rownames(iQ)<-colnames(iQ)<-levels(xyz)
+      fit.iQ<-if(method=="fitDiscrete") fitDiscrete(tree,xyz,model=iQ,...) 
+      else if(method=="ace") ace(xyz,tree,type="discrete",model=iQ,...)
+      else fitMk(tree,to.matrix(xyz,levels(xyz)),model=iQ,...)
+      ## fit dependendent model
+       
+  if(model%in%c("ER","SYM")) dQ<-make.sym(dQ)
+      k.dQ<-length(unique(as.vector(dQ)))-1
+      rownames(dQ)<-colnames(dQ)<-levels(xyz)
+      fit.dQ<-if(method=="fitDiscrete") fitDiscrete(tree,xyz,model=dQ,...) 
+      else if(method=="ace") ace(xyz,tree,type="discrete",model=dQ,...)
+      else fitMk(tree,to.matrix(xyz,levels(xyz)),model=dQ,...)
+      ## back translate independent model
+      if(method=="fitDiscrete") iQ<-.Qmatrix.from.gfit(fit.iQ)
+      else {
+        I<-fit.iQ$index.matrix
+        I[I==0]<-NA
+        iQ<-apply(I,2,function(i,x) x[i],x=fit.iQ$rates)
+        iQ[is.na(iQ)]<-0
+        diag(iQ)<--rowSums(iQ)
+        rownames(iQ)<-colnames(iQ)
+      }
+      ## dependent model
+      if(method=="fitDiscrete") dQ<-.Qmatrix.from.gfit(fit.dQ)
+      else {
+        I<-fit.dQ$index.matrix
+        I[I==0]<-NA
+        dQ<-apply(I,2,function(i,x) x[i],x=fit.dQ$rates)
+        dQ[is.na(dQ)]<-0
+        diag(dQ)<--rowSums(dQ)
+        rownames(dQ)<-colnames(dQ)
+      }
+      ## assemble object to return
+      obj<-list(independent.Q=iQ,
+                dependent.Q=dQ,
+                independent.logL=logLik(fit.iQ),
+                dependent.logL=logLik(fit.dQ),
+                independent.AIC=2*k.iQ-2*logLik(fit.iQ),
+                dependent.AIC=2*k.dQ-2*logLik(fit.dQ),
+                lik.ratio=2*(logLik(fit.dQ)-logLik(fit.iQ)),
+                P=pchisq(2*(logLik(fit.dQ)-logLik(fit.iQ)),
+                         df=k.dQ-k.iQ,
+                         lower.tail=FALSE),
+                method=method,
+                dep.var=dep.var,
+                model=model)
+      class(obj)<-"fitPagel"
+      obj
+    }
+}      
+```
+Time to find out if I did something, maybe yay?
+get a q matrix for every 1 do an exponential pull and change those rates e(exp) make sure they are all positive.
+```{r setup, include=FALSE}
+MakeQMatrix <- function(dep.var=NULL, combos=expand.grid(x=c("a","b"), y=c("a", "b"), z=c("a", "b", "c"))) {
+  Q <- matrix(0, nrow=nrow(combos), ncol=nrow(combos))
+  for (start.node in sequence(nrow(combos))) {
+    for (end.node in sequence(nrow(combos))) {
+      if(GetDistances(combos[c(start.node, end.node),])==1) {
+        if(is.null(dep.var)) {
+          Q[start.node, end.node] <- 1+max(Q)
+```
+Couldn't get this to run to generate data that I could then do an exponential pull on. 
+
+Summary of what I have done and what I had intended to do:
+  I wanted to find a way to use the Pagel Method using three binary traits to fix the problem (using just two traits can lead to false correlations because of assumed or percieved dependence) that was brought up in the Maddison Fitzgerald paper in 2015. I attempted to figure out how to code for three binary traits and knew what was going on. Unfortunately, I found out that a function did exist for three binary characters in corHmm so I needed to go back to the drawing board. 
+I then decided to use two binary characters and one three state character to answer the same question of how can I get around false/percieved correlation between characters. The biggest problem with this was the amount of potential combinations of these three characters that I needed to work with. With just three binary characters I only had 16 states that would need to be figured out and coded for. Using two binary characters and one three state character I ended up with 120 states that would need to be hard coded and worked out. Like with anything with phylogenies I quickly found out that just adding one state to a character I dramatically increase the state and space that I was working in. This increase in size made it much harder to visualize a Q matrix and therefore MUCH harder to hard code in the rates for each variable (x, y, z, xyz). 
+  I did recieve help from you to generate rates for each x, y, z, variables but soemthing within this coding just wasn't working well and I couldn't get the loop to work. This was the beginnig of a lot of trouble. I think at the point that I stopped at, I could get this to work with more guidance but there is something going on with the code that R and my computer just doesn't like. I'm not sure what else to do with this or how to fix the code (which is frustrating to me because I want to finish this problem!). 
+  Hopefully at some point I will have a brain breakthrough to figure out what is going on here. I do think I understand a lot more about R and these programs already just from playing with the "insides" of a function and doing more tutorials. 
